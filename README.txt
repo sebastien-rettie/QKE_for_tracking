@@ -1,5 +1,4 @@
-Qiskit can be installed in a conda environment following: https://qiskit.org/doc
-umentation/getting_started.html.
+Qiskit can be installed in a conda environment following: https://qiskit.org/documentation/getting_started.html.
 
 quantum_circuit contains the circuit which is used as the feature map
 
