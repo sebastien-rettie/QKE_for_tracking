@@ -5,7 +5,7 @@ Edge data originates from TrackML, pre-processing by Tuysuz et al, adapted for Q
 
 #general imports
 import argparse
-import matplotlib.pyplot as plt
+import os
 import numpy as np
 from datetime import datetime
 #qiskit
@@ -24,15 +24,15 @@ from quantum_circuit import (param_U_gate,param_feature_map) #quantum_circuit is
 
 startTime = datetime.now()
 
-#Parser is specific to the edge data provided. Events are numbered from 1000 to 1100. 
-#They are divided into train and test, user needs to check whether given event is test or train.
+#Parser is specific to the edge data provided. Events numbers should be from 0 to 49 
+#They are divided into train and test folders
 parser = argparse.ArgumentParser(description='Load one (!) event for training and one for testing. Size decides how many edges from the event are used.')
 add_arg = parser.add_argument
 
-add_arg('--train_event_number', default=1000)
-add_arg('--test_event_number', default=1001)
-add_arg('--train_size', default= 1000)
-add_arg('--test_size', default = 1000)
+add_arg('--train_event_number', default = 0, type = int)
+add_arg('--test_event_number', default = 0, type = int)  
+add_arg('--train_size', default = 1000, type = int)
+add_arg('--test_size', default = 1000, type = int)
 args = parser.parse_args()
 
 train_event_number = args.train_event_number
@@ -40,24 +40,39 @@ test_event_number = args.test_event_number
 train_size = int(args.train_size)
 test_size = int(args.test_size)
 
-train_event_features = np.load('TrackML_edges_data/ready_train/tuy_train_features'+str(train_event_number)+'.npy')
-test_event_features = np.load('TrackML_edges_data/ready_test/tuy_test_features'+str(test_event_number)+'.npy')
-train_event_labels = np.load('TrackML_edges_data/ready_train/tuy_train_labels'+str(train_event_number)+'.npy')
-test_event_labels = np.load('TrackML_edges_data/ready_test/tuy_test_labels'+str(test_event_number)+'.npy')
+#Make sure you're pointing to the right directory
+train_files_folder_str = '/Users/marcinjastrzebski/Desktop/ACADEMIA/TrackML/Simple_QKE/tuy_data/ready_train'
+train_files_folder_as_list = os.listdir(train_files_folder_str)
+train_files_folder_as_list.sort()
 
-if train_size < np.shape(train_event_features)[0]:
-    train_features = train_event_features[:train_size]
-    train_labels = train_event_labels[:train_size]
-else:
-    train_features = train_event_features
-    train_labels = train_event_labels
+train_data_file = train_files_folder_as_list[int(train_event_number)] #this is a string
+train_data = np.load(train_files_folder_str+'/'+train_data_file) #this is a numpy array
+train_label_file = train_files_folder_as_list[int(train_event_number)+50]
+train_label = np.load(train_files_folder_str+'/'+train_label_file)
 
-if test_size < np.shape(test_event_features)[0]:
-    test_features = test_event_features[:test_size]
-    test_labels = test_event_labels[:test_size]
+test_files_folder_str = '/Users/marcinjastrzebski/Desktop/ACADEMIA/TrackML/Simple_QKE/tuy_data/ready_test'
+test_files_folder_as_list = os.listdir(test_files_folder_str)
+test_files_folder_as_list.sort()
+
+test_data_file = test_files_folder_as_list[int(test_event_number)] #this is a string
+test_data = np.load(test_files_folder_str+'/'+test_data_file) #this is a numpy array
+test_label_file = test_files_folder_as_list[int(test_event_number)+50]
+test_label = np.load(test_files_folder_str+'/'+test_label_file)
+
+#if you pass more edges than exist in event, whole event is used
+if train_size < np.shape(train_data)[0]:
+    train_features = train_data[:train_size]
+    train_labels = train_label[:train_size]
 else:
-    test_features = test_event_features
-    test_labels = test_event_labels
+    train_features = train_data
+    train_labels = train_label
+
+if test_size < np.shape(test_data)[0]:
+    test_features = test_data[:test_size]
+    test_labels = test_label[:test_size]
+else:
+    test_features = test_data
+    test_labels = test_label
 
 #define what simulator we're using
 statevector_backend = QuantumInstance(Aer.get_backend("statevector_simulator"))
@@ -66,26 +81,31 @@ statevector_backend = QuantumInstance(Aer.get_backend("statevector_simulator"))
 data_dim = 6
 
 #one parameter per feature 
-params = ParameterVector('phi',data_dim)
-my_U = param_U_gate.U_flexible(data_dim,params)
+params_j = ParameterVector('phi',data_dim)
+my_U = param_U_gate.U_flexible(data_dim,params_j,single_mapping=1,pair_mapping=1)
 my_map = param_feature_map.feature_map(data_dim,my_U)
 my_kernel = QuantumKernel(feature_map=my_map,quantum_instance = statevector_backend) 
 
 #train part
-matrix_train = my_kernel.evaluate(x_vec=train_features)
-svc = SVC(kernel="precomputed")
-svc.fit(matrix_train, train_labels)
+adhoc_matrix_train = my_kernel.evaluate(x_vec=train_features)
+adhoc_svc = SVC(kernel="precomputed")
+adhoc_svc.fit(adhoc_matrix_train, train_labels)
 
 #test part 
-matrix_test = my_kernel.evaluate(x_vec=test_features, y_vec=train_features)
-score = svc.score(matrix_test, test_labels)
+adhoc_matrix_test = my_kernel.evaluate(x_vec=test_features, y_vec=train_features)
+adhoc_score = adhoc_svc.score(adhoc_matrix_test, test_labels)
 
 time_taken = datetime.now() - startTime
 
-with open('kernel_estimation_times.txt','a') as file:
-    file.write(f'Train_size: {train_size}, Test size: {test_size} \n')
-    file.write(f'Time taken: {time_taken} \n')
-    file.write(f'Kernel classification score: {score} \n')
-    file.write('\n')
+#format adapted from other analysis so might not be ideal
+results = np.array([
+{'train_event': train_event_number, 'test_event': test_event_number},
+{'train_total_edges': np.shape(train_data)[0], 'test_total_edges': np.shape(test_data)[0]},
+{'time_taken': time_taken},
+{'score': adhoc_score}
+])
+results_file_name = 'results_event_'+str(train_event_number)+'.npy'
+
+np.save(results_file_name,results) #has to be loaded with allow_pickle = True 
 
 
